@@ -99,9 +99,8 @@ static GstStaticPadTemplate src_video_template = GST_STATIC_PAD_TEMPLATE("videos
 static GstStaticPadTemplate src_subtitle_template = GST_STATIC_PAD_TEMPLATE("textsrc",
 	GST_PAD_SRC,
 	GST_PAD_ALWAYS,
-	GST_STATIC_CAPS("text/x-raw, format=utf8")
+	GST_STATIC_CAPS("text/x-raw, format= { pango-markup, utf8 }")
 );
-
 #define gst_plugin_template_parent_class parent_class
 G_DEFINE_TYPE(GstPluginTemplate, gst_plugin_template, GST_TYPE_ELEMENT);
 
@@ -159,15 +158,16 @@ gst_plugin_template_init(GstPluginTemplate* filter)
 		GST_DEBUG_FUNCPTR(gst_plugin_template_sink_event));
 	gst_pad_set_chain_function(filter->sinkpad,
 		GST_DEBUG_FUNCPTR(gst_plugin_template_chain));
-	GST_PAD_SET_PROXY_CAPS(filter->sinkpad);
+	//GST_PAD_SET_PROXY_CAPS(filter->sinkpad);
 	gst_element_add_pad(GST_ELEMENT(filter), filter->sinkpad);
 
 	filter->srcpadVideo = gst_pad_new_from_static_template(&src_video_template, "videosrc");
 	GST_PAD_SET_PROXY_CAPS(filter->srcpadVideo);
+	//gst_pad_use_fixed_caps(filter->srcpadVideo);
 	gst_element_add_pad(GST_ELEMENT(filter), filter->srcpadVideo);
 
 	filter->srcpadText = gst_pad_new_from_static_template(&src_subtitle_template, "textsrc");
-	GST_PAD_SET_PROXY_CAPS(filter->srcpadText);
+	gst_pad_use_fixed_caps(filter->srcpadText);
 	gst_element_add_pad(GST_ELEMENT(filter), filter->srcpadText);
 
 	filter->silent = FALSE;
@@ -238,6 +238,31 @@ gst_plugin_template_sink_event(GstPad* pad, GstObject* parent, GstEvent* event)
 	return ret;
 }
 
+
+static gchar*
+gst_convert_to_utf8(const gchar* str, gsize len,
+	gsize* consumed, GError** err)
+{
+	gchar* ret = NULL;
+
+	*consumed = 0;
+	/* The char cast is necessary in glib < 2.24 */
+	ret =
+		g_convert_with_fallback(str, len, "UTF-8", "UTF-8", (char*)"*",
+			consumed, NULL, err);
+	if (ret == NULL)
+		return ret;
+
+	/* + 3 to skip UTF-8 BOM if it was added */
+	len = strlen(ret);
+	if (len >= 3 && (guint8)ret[0] == 0xEF && (guint8)ret[1] == 0xBB
+		&& (guint8)ret[2] == 0xBF)
+		memmove(ret, ret + 3, len + 1 - 3);
+
+	return ret;
+}
+
+
 /* chain function
  * this function does the actual processing
  */
@@ -249,8 +274,20 @@ gst_plugin_template_chain(GstPad* pad, GstObject* parent, GstBuffer* buf)
 	filter = GST_PLUGIN_TEMPLATE(parent);
 	if (filter->silent == FALSE)
 		g_print("I'm plugged, therefore I'm in.\n");
+	
+	guint hours, mins, secs, msecs;
+	
+	hours = (guint)(buf->pts / (GST_SECOND * 60 * 60));
+	mins = (guint)((buf->pts / (GST_SECOND * 60)) % 60);
+	secs = (guint)((buf->pts / GST_SECOND) % 60);
+	msecs = (guint)((buf->pts % GST_SECOND) / (1000 * 1000));
 
-	const gchar* timestamp = "124987";
+	const gchar* timestamp = g_strdup_printf("%u:%02u:%02u.%03u", hours, mins, secs, msecs);
+
+	 
+	//GError* err = NULL;
+	//gsize* consumed = 0;
+	//gchar* charbuf = gst_convert_to_utf8(timestamp, strlen(timestamp), consumed, &err);
 	GstBuffer* textbuffer = gst_buffer_new_allocate(NULL, strlen(timestamp), NULL);
 	gst_buffer_fill(textbuffer, 0, timestamp, strlen(timestamp));
 	/*
@@ -268,18 +305,19 @@ gst_plugin_template_chain(GstPad* pad, GstObject* parent, GstBuffer* buf)
 	g_print("text written.\n");
 	GstFlowReturn videoreturn = gst_pad_push(filter->srcpadVideo, buf);
 	g_print("video written.\n");
+	/*
 	if (textreturn != GST_FLOW_OK) {
 		g_print("text flow error: %s\n", textreturn);
 		return textreturn;
-	}
+	}*/
+	/*
 	if (videoreturn != GST_FLOW_OK) {
 		g_print("video flow error\n");
 		return videoreturn;
-	}
+	}*/
 	/* just push out the incoming buffer without touching it */
 	return GST_FLOW_OK;
 }
-
 
 /* entry point to initialize the plug-in
  * initialize the plug-in itself
