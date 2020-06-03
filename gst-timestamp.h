@@ -72,6 +72,8 @@ struct _GstPluginTemplate
 	GstPad* sinkpad, * srcpadVideo, *srcpadText;
 
 	gboolean silent;
+
+    long long frame;
 };
 
 struct _GstPluginTemplateClass

@@ -62,6 +62,7 @@
 
 #include <gst/gst.h>
 #include <string>
+#include <chrono>
 #include "gst-timestamp.h"
 
 GST_DEBUG_CATEGORY_STATIC(gst_plugin_template_debug);
@@ -169,6 +170,7 @@ gst_plugin_template_init(GstPluginTemplate* filter)
 	gst_element_add_pad(GST_ELEMENT(filter), filter->srcpadText);
 
 	filter->silent = FALSE;
+	filter->frame = 0;
 }
 
 static void
@@ -254,20 +256,31 @@ gst_plugin_template_chain(GstPad* pad, GstObject* parent, GstBuffer* buf)
 	mins = (guint)((buf->pts / (GST_SECOND * 60)) % 60);
 	secs = (guint)((buf->pts / GST_SECOND) % 60);
 	msecs = (guint)((buf->pts % GST_SECOND) / (1000 * 1000));
-
-	const gchar* timestamp = g_strdup_printf("%u:%02u:%02u.%03u", hours, mins, secs, msecs);
-
+	using namespace std::chrono;
+	milliseconds ms = duration_cast<milliseconds>(
+		system_clock::now().time_since_epoch()
+		);
+	//const gchar* timestamp = g_strdup_printf("%u:%02u:%02u.%03u\n", hours, mins, secs, msecs);
+	std::string temp = std::to_string(filter->frame) + ',' + std::to_string(ms.count()) + '\n';
+	const char* timestamp = temp.c_str();
 	GstBuffer* textbuffer = gst_buffer_new_allocate(NULL, strlen(timestamp), NULL);
-	gst_buffer_fill(textbuffer, 0, timestamp, strlen(timestamp));
+	//gst_buffer_fill(textbuffer, 1, timestamp, strlen(timestamp));
+	GstMapInfo minfo;
+	gst_buffer_map(textbuffer, &minfo, GST_MAP_WRITE);
+	memcpy(minfo.data, timestamp, strlen(timestamp));
+	gst_buffer_unmap(textbuffer, &minfo);
 
 	GST_BUFFER_DURATION(textbuffer) = buf->duration;
 	GST_BUFFER_PTS(textbuffer) = buf->pts;
 	GST_BUFFER_DTS(textbuffer) = buf->dts;
 	//set the current number in the frame
 	GST_BUFFER_OFFSET(textbuffer) = buf->offset;
+	//g_print("pushing text\n");
 	GstFlowReturn textreturn = gst_pad_push(filter->srcpadText, textbuffer); //push the timestamp
+	//g_print("pushing video\n");
 	GstFlowReturn videoreturn = gst_pad_push(filter->srcpadVideo, buf); //passthrough the video
-	
+	//gst_buffer_unref(textbuffer);
+
 	//make sure text pushed ok
 	if (textreturn != GST_FLOW_OK) {
 		g_print("text flow error: %s\n", textreturn);
@@ -280,6 +293,7 @@ gst_plugin_template_chain(GstPad* pad, GstObject* parent, GstBuffer* buf)
 		return videoreturn;
 	}
 	/* just push out the incoming buffer without touching it */
+	filter->frame++;
 	return GST_FLOW_OK;
 }
 
